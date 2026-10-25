@@ -1,11 +1,12 @@
 {
   "name": "trybox-tv-navigation",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Unofficial remote navigation enhancement for Trybox",
   "packageType": "mods",
   "appName": "TryBox TV Navigation",
   "websiteURL": "https://trybox.app/",
   "main": "main.js",
-  "keys": ["MediaPlayPause", "MediaPlay", "MediaPause", "MediaRewind", "MediaFastForward"]
+  "evaluateScriptOnDocumentStart": true,
+  "keys": ["MediaPlayPause", "MediaPlay", "MediaPause", "MediaRewind", "MediaFastForward", "ColorF3Blue"]
 }
