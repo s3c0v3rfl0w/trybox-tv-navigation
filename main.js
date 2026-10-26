@@ -46,11 +46,21 @@
   var protectionStyle;
   var lastBackAt = 0;
   var forwardingEscape = false;
+  var candidatesCache = [];
+  var candidatesDirty = false;
+  var nearbyCandidates = new Set();
+  var trackedCandidates = new Set();
+  var intersectionReady = false;
+  var nearbyObserver;
+  var scopeDirty = true;
+  var cachedScope;
+  var paintPending = false;
+  var lastMoveAt = 0;
   var pageTrail = [root.location.href];
   var blockAds = true;
   try { blockAds = root.localStorage.getItem('trybox:tv:adblock') !== 'off'; } catch (_) {}
 
-  // Run at document start, before the website creates its ad requests.
+  // Best-effort page protection; already-loaded resources cannot be blocked retroactively.
   function installAdProtection() {
     if (root.fetch) {
       var originalFetch = root.fetch;
@@ -101,7 +111,7 @@
       return originalWindowOpen.apply(this, arguments);
     };
   }
-  installAdProtection();
+  try { installAdProtection(); } catch (error) { console.warn('TryBox TV: some ad protection hooks are unavailable', error); }
 
   // Track only this session's own navigation, avoiding unrelated browser history.
   ['pushState', 'replaceState'].forEach(function (method) {
@@ -131,21 +141,64 @@
     return { x: box.left, y: box.top, width: box.width, height: box.height };
   }
   function scope() {
+    if (!scopeDirty && cachedScope && (cachedScope === doc.body || visible(cachedScope))) return cachedScope;
+    scopeDirty = false;
     var layers = Array.prototype.slice.call(doc.querySelectorAll('[role="dialog"],[role="menu"],[aria-modal="true"]')).filter(visible);
-    if (layers.length) return layers[layers.length - 1];
+    if (layers.length) { cachedScope = layers[layers.length - 1]; return cachedScope; }
     // Trybox previews currently use a fixed z-index 9999 layer without a dialog role.
     var candidates = doc.querySelectorAll('body > div');
     for (var i = candidates.length - 1; i >= 0; i--) {
       var style = root.getComputedStyle(candidates[i]);
       var box = candidates[i].getBoundingClientRect();
-      if (style.position === 'fixed' && parseInt(style.zIndex, 10) >= 100 && box.width > root.innerWidth / 2 && box.height > root.innerHeight / 2 && visible(candidates[i]) && candidates[i].querySelector(selector)) return candidates[i];
+      if (style.position === 'fixed' && parseInt(style.zIndex, 10) >= 100 && box.width > root.innerWidth / 2 && box.height > root.innerHeight / 2 && visible(candidates[i]) && candidates[i].querySelector(selector)) { cachedScope = candidates[i]; return cachedScope; }
     }
-    return doc.body;
+    cachedScope = doc.body;
+    return cachedScope;
+  }
+  function refreshCandidates() {
+    candidatesCache = Array.prototype.slice.call(doc.querySelectorAll(selector));
+    if (!nearbyObserver) return;
+    var next = new Set(candidatesCache);
+    trackedCandidates.forEach(function (element) {
+      if (!next.has(element)) { nearbyObserver.unobserve(element); nearbyCandidates.delete(element); }
+    });
+    candidatesCache.forEach(function (element) { if (!trackedCandidates.has(element)) nearbyObserver.observe(element); });
+    trackedCandidates = next;
+  }
+  function addAdjacent(pool) {
+    // IntersectionObserver clips horizontal rails; include the next hidden card.
+    var cursor = selected;
+    for (var depth = 0; cursor && cursor !== doc.body && depth < 4; depth++, cursor = cursor.parentElement) {
+      [cursor.previousElementSibling, cursor.nextElementSibling].forEach(function (sibling) {
+        if (!sibling) return;
+        if (sibling.matches(selector)) pool.add(sibling);
+        // Do not descend into an entire unrelated page section.
+        if (sibling.children.length < 10) {
+          var nested = sibling.querySelectorAll(selector);
+          if (nested.length < 30) Array.prototype.forEach.call(nested, function (element) { pool.add(element); });
+        }
+      });
+    }
   }
   function controls(container) {
-    return Array.prototype.slice.call(container.querySelectorAll(selector)).filter(function (element) {
-      return visible(element) && element.getAttribute('tabindex') !== '-1' && !element.closest('svg');
+    var pool;
+    if (container === doc.body && intersectionReady) {
+      pool = new Set(nearbyCandidates);
+      if (selected) pool.add(selected);
+      addAdjacent(pool);
+      pool = Array.from(pool);
+    } else pool = container === doc.body ? candidatesCache : Array.prototype.slice.call(container.querySelectorAll(selector));
+    return pool.filter(function (element) {
+      if (!element.isConnected || element.getAttribute('tabindex') === '-1' || element.closest('svg')) return false;
+      var box = element.getBoundingClientRect();
+      if (container === doc.body && (box.bottom < -root.innerHeight || box.top > root.innerHeight * 2 || box.right < -root.innerWidth || box.left > root.innerWidth * 2)) return false;
+      return visible(element);
     });
+  }
+  function schedulePaint() {
+    if (paintPending) return;
+    paintPending = true;
+    root.requestAnimationFrame(function () { paintPending = false; paintFocus(); });
   }
   function focus(element) {
     if (!visible(element)) return;
@@ -154,10 +207,10 @@
     selected.classList.add('trybox-remote-focus');
     try { selected.focus({ preventScroll: true }); } catch (_) { selected.focus(); }
     selected.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'auto' });
-    root.requestAnimationFrame(paintFocus);
+    schedulePaint();
   }
   function paintFocus() {
-    if (!focusRing || !visible(selected)) { if (focusRing) focusRing.hidden = true; return; }
+    if (!focusRing || !visible(selected)) { if (focusRing && !focusRing.hidden) focusRing.hidden = true; return; }
     // Highlight the poster rather than the oversized ranking/card wrapper.
     var images = selected.querySelectorAll('img');
     var target = selected;
@@ -168,7 +221,8 @@
     }
     var bounds = target.getBoundingClientRect();
     var radius = parseFloat(root.getComputedStyle(target).borderTopLeftRadius) || 8;
-    focusRing.hidden = !inView(target);
+    var hideRing = !inView(target);
+    if (focusRing.hidden !== hideRing) focusRing.hidden = hideRing;
     focusRing.style.left = (bounds.left - 4) + 'px';
     focusRing.style.top = (bounds.top - 4) + 'px';
     focusRing.style.width = (bounds.width + 8) + 'px';
@@ -198,12 +252,14 @@
     focus(onscreen[0] || candidates[0]);
   }
   function move(direction) {
+    var moveStarted = root.performance.now();
     recover();
     if (!selected) return;
     var origin = rect(selected);
     var best = null;
     var bestScore = Infinity;
-    controls(scope()).forEach(function (element) {
+    var candidates = controls(scope());
+    candidates.forEach(function (element) {
       if (element === selected) return;
       var box = rect(element);
       // Limit unrelated far-away page sections; allow offscreen cards in a rail.
@@ -212,6 +268,8 @@
       if (value < bestScore) { bestScore = value; best = element; }
     });
     if (best) focus(best);
+    focusRing.setAttribute('data-navigation-candidates', String(candidates.length));
+    focusRing.setAttribute('data-navigation-ms', (root.performance.now() - moveStarted).toFixed(1));
   }
   function editing(element) {
     return element && (element.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName) || element.getAttribute('role') === 'slider');
@@ -252,7 +310,7 @@
     if (pageTrail.length > 1) { root.history.back(); return; }
     if (root.location.pathname !== '/') { root.location.assign('/'); return; }
     // At Home, move back to the top instead of unexpectedly leaving Trybox.
-    var first = controls(doc.body)[0];
+    var first = candidatesCache.filter(visible)[0];
     root.scrollTo(0, 0);
     if (first) focus(first);
   }
@@ -291,6 +349,8 @@
     if (direction) {
       event.preventDefault();
       event.stopImmediatePropagation();
+      if (event.repeat && Date.now() - lastMoveAt < 70) return;
+      lastMoveAt = Date.now();
       move(direction);
     } else if (code === 13) {
       recover();
@@ -308,6 +368,7 @@
     if (protectionStyle) protectionStyle.textContent = blockAds ? 'ins.adsbygoogle,[data-ad-slot],[data-ad-client],[data-trybox-blocked-ad],[id^="google_ads_iframe"],.ad-banner,.advertisement,[data-testid="ad-banner"]{display:none!important}' : '';
   }
   function start() {
+    if (!doc.body || !doc.head) { setTimeout(start, 50); return; }
     var style = doc.createElement('style');
     style.textContent = '.trybox-remote-focus{outline:none!important}.trybox-remote-ring{position:fixed;pointer-events:none;z-index:2147483646;box-sizing:border-box;border:2px solid rgba(255,255,255,.95);box-shadow:0 0 0 1px rgba(0,0,0,.3),0 5px 20px rgba(0,0,0,.28);transition:left .1s ease-out,top .1s ease-out,width .1s ease-out,height .1s ease-out}.trybox-remote-ring[hidden]{display:none!important}.trybox-remote-notice{position:fixed;bottom:5vh;left:10vw;right:10vw;padding:20px 28px;background:#171b24;color:white;border-radius:12px;font:24px Arial;text-align:center;z-index:2147483647}@media(prefers-reduced-motion:reduce){.trybox-remote-ring{transition:none}}';
     doc.head.appendChild(style);
@@ -318,6 +379,13 @@
     focusRing.className = 'trybox-remote-ring';
     focusRing.setAttribute('aria-hidden', 'true');
     doc.body.appendChild(focusRing);
+    if (root.IntersectionObserver) {
+      nearbyObserver = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) { if (entry.isIntersecting) nearbyCandidates.add(entry.target); else nearbyCandidates.delete(entry.target); });
+        intersectionReady = true;
+      }, { rootMargin: '80% 80%' });
+    }
+    refreshCandidates();
     root.addEventListener('keydown', keydown, true);
     root.addEventListener('keyup', function (event) {
       if (event.keyCode === 10009 || event.keyCode === 27 || event.key === 'BrowserBack') { event.preventDefault(); event.stopImmediatePropagation(); }
@@ -328,17 +396,27 @@
         if (selected) selected.classList.remove('trybox-remote-focus');
         selected = event.target;
         selected.classList.add('trybox-remote-focus');
-        root.requestAnimationFrame(paintFocus);
+        schedulePaint();
       }
     });
     new MutationObserver(function (records) {
-      // Ignore our focus-class changes; watch navigation and modal lifecycle.
-      if (!records.some(function (record) { return record.type === 'childList' || record.attributeName !== 'class'; })) return;
+      // Ignore our own overlay and text-only updates (including player timers).
+      var relevant = records.filter(function (record) {
+        if (record.target === focusRing || record.target === protectionStyle || (record.target.closest && record.target.closest('.trybox-remote-notice'))) return false;
+        if (record.type !== 'childList') return true;
+        return Array.prototype.some.call(record.addedNodes, function (node) { return node.nodeType === 1; }) || Array.prototype.some.call(record.removedNodes, function (node) { return node.nodeType === 1; });
+      });
+      if (!relevant.length) return;
+      if (relevant.some(function (record) { return record.type === 'childList'; })) candidatesDirty = true;
+      scopeDirty = true;
       clearTimeout(scanTimer);
-      scanTimer = setTimeout(recover, 100);
+      scanTimer = setTimeout(function () {
+        if (candidatesDirty) { candidatesDirty = false; refreshCandidates(); }
+        recover();
+      }, 120);
     }).observe(doc.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'aria-hidden', 'disabled'] });
-    root.addEventListener('scroll', paintFocus, true);
-    root.addEventListener('resize', paintFocus);
+    root.addEventListener('scroll', schedulePaint, true);
+    root.addEventListener('resize', function () { scopeDirty = true; schedulePaint(); });
     root.addEventListener('popstate', function () {
       var index = pageTrail.lastIndexOf(root.location.href);
       pageTrail = index >= 0 ? pageTrail.slice(0, index + 1) : [root.location.href];
