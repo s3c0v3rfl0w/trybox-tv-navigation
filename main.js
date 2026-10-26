@@ -156,6 +156,7 @@
     return cachedScope;
   }
   function refreshCandidates() {
+    enhanceNavigation();
     candidatesCache = Array.prototype.slice.call(doc.querySelectorAll(selector));
     if (!nearbyObserver) return;
     var next = new Set(candidatesCache);
@@ -164,6 +165,23 @@
     });
     candidatesCache.forEach(function (element) { if (!trackedCandidates.has(element)) nearbyObserver.observe(element); });
     trackedCandidates = next;
+  }
+  function enhanceNavigation() {
+    // Identify the actual site navbar, leaving footer and player controls alone.
+    Array.prototype.forEach.call(doc.querySelectorAll('nav'), function (nav) {
+      var knownPaths = ['/', '/movies', '/tv', '/universes', '/clips', '/trysub', '/my-box', '/search'];
+      var links = nav.querySelectorAll('a[href]');
+      var matches = Array.prototype.filter.call(links, function (link) {
+        try { return knownPaths.indexOf(new URL(link.href, root.location.href).pathname) >= 0; } catch (_) { return false; }
+      });
+      if (matches.length < 4) return;
+      nav.classList.add('trybox-tv-nav');
+      if (nav.parentElement && root.getComputedStyle(nav.parentElement).position === 'fixed') nav.parentElement.classList.add('trybox-tv-nav-host');
+    });
+    Array.prototype.forEach.call(doc.querySelectorAll('header [aria-label="Profile menu"]'), function (button) {
+      button.classList.add('trybox-tv-profile');
+      button.closest('header').classList.add('trybox-tv-header');
+    });
   }
   function addAdjacent(pool) {
     // IntersectionObserver clips horizontal rails; include the next hidden card.
@@ -371,6 +389,7 @@
     if (!doc.body || !doc.head) { setTimeout(start, 50); return; }
     var style = doc.createElement('style');
     style.textContent = '.trybox-remote-focus{outline:none!important}.trybox-remote-ring{position:fixed;pointer-events:none;z-index:2147483646;box-sizing:border-box;border:2px solid rgba(255,255,255,.95);box-shadow:0 0 0 1px rgba(0,0,0,.3),0 5px 20px rgba(0,0,0,.28);transition:left .1s ease-out,top .1s ease-out,width .1s ease-out,height .1s ease-out}.trybox-remote-ring[hidden]{display:none!important}.trybox-remote-notice{position:fixed;bottom:5vh;left:10vw;right:10vw;padding:20px 28px;background:#171b24;color:white;border-radius:12px;font:24px Arial;text-align:center;z-index:2147483647}@media(prefers-reduced-motion:reduce){.trybox-remote-ring{transition:none}}';
+    style.textContent += '@media(min-width:960px){.trybox-tv-nav-host{top:20px!important;align-items:center!important}.trybox-tv-nav{height:auto!important;min-height:64px!important;max-width:calc(100vw - 320px)!important;gap:6px!important;padding:6px!important;overflow-x:auto!important;overflow-y:hidden!important;scrollbar-width:none;background:rgba(10,13,20,.94)!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}.trybox-tv-nav::-webkit-scrollbar{display:none}.trybox-tv-nav>a{display:flex!important;align-items:center!important;justify-content:center!important;flex-shrink:0!important;width:auto!important;min-width:52px!important;height:52px!important;padding:0 clamp(14px,1vw,20px)!important;font-size:clamp(18px,1.35vw,26px)!important;line-height:1.2!important;font-weight:600!important;white-space:nowrap!important}.trybox-tv-nav>a[aria-current="page"]{background:rgba(255,255,255,.18)!important;color:#fff!important}.trybox-tv-nav>a svg{width:26px!important;height:26px!important}.trybox-tv-header>div{height:104px!important}.trybox-tv-profile{min-width:52px!important;min-height:52px!important;justify-content:center!important}.trybox-tv-profile img{width:46px!important;height:46px!important}}';
     doc.head.appendChild(style);
     protectionStyle = doc.createElement('style');
     doc.head.appendChild(protectionStyle);

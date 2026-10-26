@@ -12,6 +12,8 @@ The module retains the thin white focus frame, nested overlay focus restoration,
 
 ## Navigation performance
 
+Version 0.2.2 also enlarges the site's top navbar at TV-sized viewports (960 CSS pixels and wider): text scales from 18 to 26 px, links have 52 px-high targets, and the search icon/profile control are larger. At 1920 × 1080 the synthetic site-header fixture measured 25.92 px text and all tabs fit without overlapping the profile button. At 1280 × 720 there was also no overlap. At 960 px the bar scrolls horizontally and focusing Search brings it into view. The module identifies the navbar by its site links rather than styling every navigation element. Real-TV appearance still needs confirmation.
+
 Directional navigation reuses a cached control list and IntersectionObserver proximity results instead of querying and styling every control on each arrow press. Adjacent offscreen rail cards remain eligible. Scope lookups are cached, focus-frame updates are coalesced into animation frames, held-key repeats are limited, and the DOM observer ignores its own focus frame and text-only player updates. Structural page changes refresh the control index.
 
 In a desktop-browser fixture with 2,019 buttons, one measured arrow press evaluated 18 nearby candidates in about 0.7 ms. Offscreen Card F → Card G and preview Back also passed. This is synthetic evidence, not a Samsung TV performance measurement.
@@ -27,7 +29,7 @@ Version 0.1.0 was reported working on the user's TV, with unreliable Back and an
 ## Install in TizenBrew
 
 1. Install [TizenBrew using its maintained instructions](https://github.com/reisxd/TizenBrew/blob/main/docs/README.md). Test that its module/settings UI works before proceeding; [a Tizen 9 settings issue is open](https://github.com/reisxd/TizenBrew/issues/245).
-2. In TizenBrew, open its module settings and add a GitHub module. Enter `s3c0v3rfl0w/trybox-tv-navigation@v0.2.1` if the interface asks for owner/repository. If it asks for a full module identifier, enter `gh/s3c0v3rfl0w/trybox-tv-navigation@v0.2.1`. Remove the old module entry and add this new version; using a distinct version avoids TizenBrew's in-memory script cache retaining the old code. Fully restart TizenBrew if needed.
+2. In TizenBrew, open its module settings and add a GitHub module. Enter `s3c0v3rfl0w/trybox-tv-navigation@v0.2.2` if the interface asks for owner/repository. If it asks for a full module identifier, enter `gh/s3c0v3rfl0w/trybox-tv-navigation@v0.2.2`. Remove the old module entry and add this new version; using a distinct version avoids TizenBrew's in-memory script cache retaining the old code. Fully restart TizenBrew if needed.
 3. Return to the module list and launch **TryBox TV Navigation**.
 4. Sign in directly on the TV. Do not place login cookies or account credentials in this repository.
 5. Test arrows across rails, vertical movement, OK, Back, preview focus restoration, search entry, subtitles, and playback on the S85F. If the player is a third-party frame, its controls require separate integration or pointer fallback.
